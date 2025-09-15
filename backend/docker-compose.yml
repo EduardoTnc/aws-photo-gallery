@@ -1,0 +1,17 @@
+# backend/docker-compose.yml
+
+services:
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: webappdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: micontra
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

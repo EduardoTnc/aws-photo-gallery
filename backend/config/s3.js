@@ -1,11 +1,17 @@
 // config/s3.js
-const aws = require('aws-sdk');
+const { S3Client } = require('@aws-sdk/client-s3');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 require('dotenv').config();
 
 // Configuración de S3
-const s3 = new aws.S3(); // El SDK detectará automáticamente el Rol IAM en ECS
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
+}); // El SDK detectará automáticamente el Rol IAM en ECS
 
 // Configuración de Multer para subir a S3
 const upload = multer({
