@@ -1,0 +1,12 @@
+# .dockerignore
+
+# Ignorar las dependencias de Node, se instalarán dentro del contenedor
+node_modules
+
+# Archivos de log y de configuración local
+npm-debug.log
+.env
+
+# Archivos del sistema operativo y de IDEs
+.DS_Store
+.vscode/
