@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import ImageGallery from '../components/ImageGallery';
-import ImageUploadForm from '../components/ImageUploadform';
+import ImageUploadForm from '../components/ImageUploadForm';
 import EditImageModal from '../components/EditImageModal';
 import Toast from '../components/Toast';
 

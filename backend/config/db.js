@@ -8,6 +8,9 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: 'webappdb',
   port: 5432,
+  ssl: {
+    rejectUnauthorized: false // Necesario para RDS, ya que no verificamos el certificado CA
+  }
 });
 
 // Script para crear la tabla si no existe

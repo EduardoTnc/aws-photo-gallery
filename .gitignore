@@ -1,0 +1,75 @@
+# ########## General ##########
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos de configuración de editores
+.vscode/
+.idea/
+
+# Archivos de log
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+
+# ########## Backend (Node.js) ##########
+# Dependencias de Node
+backend/node_modules/
+
+# Archivos de entorno - ¡MUY IMPORTANTE PARA LA SEGURIDAD!
+# Nunca subir claves secretas, contraseñas o credenciales.
+backend/.env
+backend/.env.local
+backend/.env.development.local
+backend/.env.test.local
+backend/.env.production.local
+
+# Archivos de caché o compilados de TypeScript
+backend/dist/
+backend/.npm
+backend/.pnpm-store/
+
+
+# ########## Frontend (Vite + React) ##########
+# Asumo que tu frontend se llama 'frontend-s3'
+# Dependencias de Node
+frontend-s3/node_modules/
+
+# Archivos de entorno del frontend
+frontend-s3/.env
+frontend-s3/.env.local
+
+# Carpeta de build/distribución generada por Vite
+frontend-s3/dist/
+
+# Archivos de caché y logs de Vite
+frontend-s3/.vite/
+frontend-s3/coverage/
+
+
+# ########## AWS y Despliegue ##########
+# Archivos comprimidos de la AWS CLI o cualquier otro binario descargado
+awsccliv2.zip
+aws/
+
+# Archivos de configuración específicos del entorno o temporales
+.terraform/
+*.tfstate
+*.tfstate.*.backup
+*.tfvars
+terraform.tfvars
+
+# Parámetros de CloudFormation (si los separas en un archivo JSON)
+parameters.json
+
+# Cache de Serverless Framework
+.serverless/
+
+# ########## Archivos de pnpm ##########
+# Si utilizas un workspace de pnpm, puedes ignorar el node_modules de la raíz
+# /node_modules
