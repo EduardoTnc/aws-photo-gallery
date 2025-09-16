@@ -409,7 +409,7 @@ Resources:
       ContainerDefinitions:
         - Name: !Sub ${ProjectName}-container
           # !!! REEMPLAZA ESTA LÍNEA CON LA URI DE TU IMAGEN DE ECR !!!
-          Image: '905418112229.dkr.ecr.us-west-2.amazonaws.com/tarea4-app:latest'
+          Image: '905418112229.dkr.ecr.us-west-2.amazonaws.com/tarea4-app:v1.2'
           PortMappings:
             - ContainerPort: 3000
               HostPort: 0
@@ -438,6 +438,11 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "${ProjectName}-s3-bucket-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
       CorsConfiguration: # Permite que el frontend en S3 hable con el backend en ECS
         CorsRules:
           - AllowedHeaders:
@@ -446,9 +451,22 @@ Resources:
               - GET
               - POST
               - PUT
+              - DELETE
             AllowedOrigins:
               - "*" # En producción, limitarías esto al dominio de tu frontend
             MaxAge: 3000
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3Bucket}/*"
 
   AppLogGroup:
     Type: AWS::Logs::LogGroup
