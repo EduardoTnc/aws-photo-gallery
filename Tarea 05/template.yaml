@@ -1,0 +1,684 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Tarea 05 - Infraestructura escalable con ECS, RDS, CloudWatch, CloudTrail y etiquetado para gestión de costos.
+
+# =================================================================
+# --- PARÁMETROS ---
+# =================================================================
+Parameters:
+  DBPassword:
+    Type: String
+    Description: Contrasenia para la base de datos RDS PostgreSQL.
+    NoEcho: true
+    MinLength: 8
+    AllowedPattern: "[a-zA-Z0-9]+"
+
+  TagProject:
+    Type: String
+    Default: tarea05
+    Description: Etiqueta para agrupar todos los recursos del proyecto.
+    AllowedPattern: "[a-z0-9-]+" # Expresión regular que solo permite minúsculas, números y guiones
+
+  TagEnvironment:
+    Type: String
+    Default: development
+    Description: Etiqueta para identificar el entorno (Dev, Prod).
+    AllowedPattern: "[a-z0-9-]+" # Expresión regular que solo permite minúsculas, números y guiones
+
+  TagOwner:
+    Type: String
+    Default: alumno
+    Description: Nombre del responsable de los recursos.
+    AllowedPattern: "[a-z0-9-]+" # Expresión regular que solo permite minúsculas, números y guiones
+
+# =================================================================
+# --- MAPEOS ---
+# =================================================================
+Mappings:
+  AWSRegionToAMI:
+    us-west-2:
+      ECSOptimizedAMI: ami-0fd6e8a9a82819c7d # Amazon Linux 2023 ECS-Optimized AMI
+    # Puedes añadir más IDs de AMI para otras regiones aquí
+
+Resources:
+  # =================================================================
+  # --- BLOQUE 1: RED (VPC, SUBREDES, GATEWAYS, RUTAS) ---
+  # =================================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-VPC" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-IGW" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # --- Subredes en AZ 1 ---
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-public-1" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  AppSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.10.0/24
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-app-1" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  DBSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.100.0/24
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-db-1" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  # --- Subredes en AZ 2 ---
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-public-2" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  AppSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.20.0/24
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-app-2" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  DBSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.110.0/24
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-db-2" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  # --- Gateways, Rutas Públicas y Rutas Privadas para AZ 1 ---
+  ElasticIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-eip-1" }
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIP1.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-nat-gw-1" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-public-rt" }
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-private-rt-1" }
+  PrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+  AppSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+  DBSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DBSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+
+  # --- Gateways y Rutas Privadas para AZ 2 (PARA ALTA DISPONIBILIDAD) ---
+  ElasticIP2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-eip-2" }
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIP2.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-nat-gw-2" }
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - { Key: Name, Value: !Sub "${TagProject}-private-rt-2" }
+  PrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+  AppSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+  DBSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DBSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+
+  # =================================================================
+  # --- BLOQUE 2: SEGURIDAD (SECURITY GROUPS Y ROLES) ---
+  # =================================================================
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permite trafico HTTP al ALB
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+      SecurityGroupEgress:
+        - { IpProtocol: -1, CidrIp: 0.0.0.0/0 }
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permite trafico desde el ALB a los contenedores ECS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 0, ToPort: 65535, SourceSecurityGroupId: !Ref ALBSecurityGroup }
+      SecurityGroupEgress:
+        - { IpProtocol: -1, CidrIp: 0.0.0.0/0 }
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup 
+    Properties:
+      GroupDescription: Permite trafico desde ECS a la base de datos RDS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref ECSSecurityGroup }
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - { Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: "sts:AssumeRole" }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - { Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: "sts:AssumeRole" }
+      Policies:
+        - PolicyName: S3WritePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: ["s3:PutObject", "s3:PutObjectAcl"]
+                Resource: !Sub "arn:aws:s3:::${S3Bucket}/*"
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - { Effect: Allow, Principal: { Service: ec2.amazonaws.com }, Action: "sts:AssumeRole" }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - { Effect: Allow, Principal: { Service: application-autoscaling.amazonaws.com }, Action: "sts:AssumeRole" }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+
+  # =================================================================
+  # --- BLOQUE 3: BASE DE DATOS (RDS POSTGRESQL) ---
+  # =================================================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subredes para la instancia RDS
+      SubnetIds: [!Ref DBSubnet1, !Ref DBSubnet2]
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: webappdb
+      Engine: postgres
+      EngineVersion: '17.4'
+      MasterUsername: postgres
+      MasterUserPassword: !Ref DBPassword
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: '20'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      PubliclyAccessible: false
+      DeletionProtection: false
+      MultiAZ: false
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  # =================================================================
+  # --- BLOQUE 4: ECS, CÓMPUTO, BALANCEO Y AUTO SCALING ---
+  # =================================================================
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${TagProject}-cluster"
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !FindInMap [AWSRegionToAMI, !Ref "AWS::Region", ECSOptimizedAMI]
+        InstanceType: t3.micro
+        IamInstanceProfile:
+          Arn: !GetAtt EC2InstanceProfile.Arn
+        SecurityGroupIds:
+          - !GetAtt ECSSecurityGroup.GroupId
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config;
+        # --- BLOQUE CORREGIDO ---
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Project
+                Value: !Ref TagProject
+              - Key: Environment
+                Value: !Ref TagEnvironment
+              - Key: Owner
+                Value: !Ref TagOwner
+          - ResourceType: volume
+            Tags:
+              - Key: Project
+                Value: !Ref TagProject
+              - Key: Environment
+                Value: !Ref TagEnvironment
+              - Key: Owner
+                Value: !Ref TagOwner
+
+  EC2AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: [!Ref AppSubnet1, !Ref AppSubnet2]
+      LaunchTemplate:
+        LaunchTemplateId: !Ref EC2LaunchTemplate
+        Version: !GetAtt EC2LaunchTemplate.LatestVersionNumber
+      MinSize: '2'
+      MaxSize: '4'
+      DesiredCapacity: '2'
+      Tags:
+        - { Key: Project, Value: !Ref TagProject, PropagateAtLaunch: true }
+        - { Key: Environment, Value: !Ref TagEnvironment, PropagateAtLaunch: true }
+        - { Key: Owner, Value: !Ref TagOwner, PropagateAtLaunch: true }
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${TagProject}-alb"
+      Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+      SecurityGroups:
+        - !GetAtt ALBSecurityGroup.GroupId
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+        
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${TagProject}-tg"
+      VpcId: !Ref VPC
+      Protocol: HTTP
+      Port: 80
+      HealthCheckPath: /health
+      TargetType: instance
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+  
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "${TagProject}-service"
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 2
+      LaunchType: EC2
+      LoadBalancers:
+        - ContainerName: !Sub "${TagProject}-container"
+          ContainerPort: 3000
+          TargetGroupArn: !Ref TargetGroup
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+    DependsOn: Listener
+
+  ECSServiceScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 2
+      ResourceId: !Sub service/${ECSCluster.Name}/${ECSService.Name}
+      RoleARN: !GetAtt AutoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ECSServiceScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "${TagProject}-scale-out-policy"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ECSServiceScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            ScalingAdjustment: 1
+
+  ECSServiceScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "${TagProject}-scale-in-policy"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ECSServiceScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 300
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${TagProject}-cpu-high-alarm"
+      AlarmDescription: "Dispara la politica de escalado hacia arriba cuando la CPU supera el 70%"
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - { Name: ClusterName, Value: !Ref ECSCluster }
+        - { Name: ServiceName, Value: !GetAtt ECSService.Name }
+      AlarmActions:
+        - !Ref ECSServiceScaleOutPolicy
+
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${TagProject}-cpu-low-alarm"
+      AlarmDescription: "Dispara la politica de escalado hacia abajo cuando la CPU es inferior al 30%"
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 30
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - { Name: ClusterName, Value: !Ref ECSCluster }
+        - { Name: ServiceName, Value: !GetAtt ECSService.Name }
+      AlarmActions:
+        - !Ref ECSServiceScaleInPolicy
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${TagProject}-task"
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: bridge
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Sub "${TagProject}-container"
+          Image: '905418112229.dkr.ecr.us-west-2.amazonaws.com/tarea4-app:v1.2'
+          PortMappings:
+            - { ContainerPort: 3000, HostPort: 0 }
+          Environment:
+            - { Name: DB_HOST, Value: !GetAtt RDSInstance.Endpoint.Address }
+            - { Name: DB_USER, Value: postgres }
+            - { Name: DB_PASSWORD, Value: !Ref DBPassword }
+            - { Name: S3_BUCKET_NAME, Value: !Ref S3Bucket }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AppLogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: ecs
+
+  # =================================================================
+  # --- BLOQUE 5: ALMACENAMIENTO, LOGS Y AUDITORÍA ---
+  # =================================================================
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${TagProject}-s3-bucket-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        { BlockPublicAcls: false, BlockPublicPolicy: false, IgnorePublicAcls: false, RestrictPublicBuckets: false }
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      LifecycleConfiguration:
+        Rules:
+          - { Id: LifecycleRule, Status: Enabled, Transitions: [{ StorageClass: INTELLIGENT_TIERING, TransitionInDays: 30 }], ExpirationInDays: 365 }
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+          - { Sid: PublicReadGetObject, Effect: Allow, Principal: "*", Action: "s3:GetObject", Resource: !Sub "arn:aws:s3:::${S3Bucket}/*" }
+
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${TagProject}-app"
+      RetentionInDays: 7
+  
+  CloudTrailLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "cloudtrail-logs-${TagProject}-${AWS::AccountId}"
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+  
+  CloudTrailLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailLogBucket.Arn
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${CloudTrailLogBucket}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                
+  MyCloudTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: CloudTrailLogBucketPolicy
+    Properties:
+      S3BucketName: !Ref CloudTrailLogBucket
+      IsLogging: true
+      EnableLogFileValidation: true
+      IncludeGlobalServiceEvents: false
+      IsMultiRegionTrail: false
+      Tags:
+        - { Key: Project, Value: !Ref TagProject }
+        - { Key: Environment, Value: !Ref TagEnvironment }
+        - { Key: Owner, Value: !Ref TagOwner }
+
+# =================================================================
+# --- SECCIÓN DE SALIDAS ---
+# =================================================================
+Outputs:
+  ALBUrl:
+    Description: URL del Application Load Balancer para el backend API.
+    Value: !Sub "http://${LoadBalancer.DNSName}"
+
+  S3BucketName:
+    Description: Nombre del bucket S3 creado para subir las imagenes.
+    Value: !Ref S3Bucket
