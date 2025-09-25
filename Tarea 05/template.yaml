@@ -493,7 +493,7 @@ Resources:
     Properties:
       MaxCapacity: 4
       MinCapacity: 2
-      ResourceId: !Sub service/${ECSCluster.Name}/${ECSService.Name}
+      ResourceId: !Sub service/${ECSCluster}/${ECSService.Name}
       RoleARN: !GetAtt AutoScalingRole.Arn
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
@@ -616,8 +616,13 @@ Resources:
     Properties:
       Bucket: !Ref S3Bucket
       PolicyDocument:
+        Version: '2012-10-17'
         Statement:
-          - { Sid: PublicReadGetObject, Effect: Allow, Principal: "*", Action: "s3:GetObject", Resource: !Sub "arn:aws:s3:::${S3Bucket}/*" }
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${S3Bucket}/*'
 
   AppLogGroup:
     Type: AWS::Logs::LogGroup
@@ -645,17 +650,17 @@ Resources:
             Effect: Allow
             Principal:
               Service: cloudtrail.amazonaws.com
-            Action: s3:GetBucketAcl
+            Action: 's3:GetBucketAcl'
             Resource: !GetAtt CloudTrailLogBucket.Arn
           - Sid: AWSCloudTrailWrite
             Effect: Allow
             Principal:
               Service: cloudtrail.amazonaws.com
-            Action: s3:PutObject
-            Resource: !Sub "arn:aws:s3:::${CloudTrailLogBucket}/AWSLogs/${AWS::AccountId}/*"
+            Action: 's3:PutObject'
+            Resource: !Sub 'arn:aws:s3:::${CloudTrailLogBucket}/AWSLogs/${AWS::AccountId}/*'
             Condition:
               StringEquals:
-                s3:x-amz-acl: bucket-owner-full-control
+                's3:x-amz-acl': bucket-owner-full-control
                 
   MyCloudTrail:
     Type: AWS::CloudTrail::Trail
